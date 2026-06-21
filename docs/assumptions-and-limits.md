@@ -18,25 +18,28 @@ under **Confirmed**, **Probable**, or **To verify**.
 Sources: Mechlands product & driver pages; independent reviews (Root-Nation,
 WCCFTech, EnostTech, GizmoVue).
 
-## 🟡 Probable (inferred from OEM-sibling devices & common practice)
+## ✅ Confirmed — from the real device's HID report descriptors
 
-- USB **VID/PID** is in the `0x3151:0x40xx` family (from the
-  `controlhub.top`/`qmk.top` WebHID device family, e.g. AttackShark K86).
-- The control channel is a **vendor-defined HID interface** (usage page
-  `0xFF00`), separate from the keyboard interface.
-- HID reports are **64 bytes**.
-- The screen is **RGB565**, most likely **240×240** (the dominant panel in this
-  device class).
-- Image upload is **chunked** over the 64-byte report in a BEGIN/DATA/END flow.
-- On-device animation runs at only **a few fps** because USB Full-Speed HID
-  sustains ~64 KB/s and a 240×240 RGB565 frame is ~115 KB.
+- USB identity is **`05ac:024f`**, manufacturer **SONiX**, product
+  **"SONiX Mechlands Vibe99"** (wired) / **"2.4G Wireless Receiver"** (dongle).
+  It **reuses Apple's VID:PID**, so matching also requires the product string.
+- Two wired vendor interfaces, **no numbered Report ID**:
+  - **Control** — usage page `0xFF13`, usage `0x01`: 64-byte Input/Output/Feature.
+  - **Screen** — usage page `0xFF68`, usage `0x61`: 64-byte Input + **4096-byte
+    Output** (the pixel pipe).
+- 2.4G mode uses different, smaller vendor reports (`0xFF60`) → config over wired.
+- The chip is **SONiX**, consistent with this OEM keyboard family.
+
+## 🟡 Probable
+
+- The screen is **RGB565**, most likely **240×240** (dominant panel in this class).
+- Image upload is **chunked** over the 4096-byte screen report in a
+  BEGIN/DATA/END flow.
+- On-device animation runs at only **a few fps** due to USB bandwidth.
 - A WebHID web driver likely exists for this OEM family (makes RE far easier).
 
 ## ❓ To verify on real hardware
 
-- Exact **VID/PID** of the Vibe99 (and whether wired vs 2.4G differ).
-- Whether a **numbered Report ID** is used, and the exact report length.
-- The exact **vendor usage page** / interface number of the control channel.
 - The **opcode** values for RGB, screen, clock, device-info.
 - The **checksum** algorithm (sum8 / xor / crc16 / none) and the byte range it
   covers.

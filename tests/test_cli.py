@@ -49,25 +49,26 @@ def test_protocol_checksum():
     assert "0x06" in result.stdout
 
 
-def test_list_devices_all(fake_hid_enumeration):
+def test_list_devices_recognises_real_vibe99(fake_hid_enumeration):
     fake_hid_enumeration(
         [
             {
-                "path": b"/dev/hidraw0",
-                "vendor_id": 0x3151,
-                "product_id": 0x4011,
-                "usage_page": 0xFF00,
+                "path": b"/dev/hidraw3",
+                "vendor_id": 0x05AC,
+                "product_id": 0x024F,
+                "usage_page": 0xFF13,
                 "usage": 1,
-                "interface_number": 1,
-                "manufacturer_string": "Mechlands",
-                "product_string": "Vibe99",
+                "interface_number": 3,
+                "manufacturer_string": "SONiX",
+                "product_string": "SONiX Mechlands Vibe99",
                 "serial_number": "X",
             }
         ]
     )
     result = runner.invoke(app, ["list-devices"])
     assert result.exit_code == 0
-    assert "3151:4011" in result.stdout
+    assert "05ac:024f" in result.output
+    assert "confirmed" in result.output
 
 
 def test_doctor_runs(fake_hid_enumeration):

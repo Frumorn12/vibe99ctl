@@ -7,7 +7,7 @@ name = "vibe99ctl"
 version = "0.1.0"
 description = "Open-source terminal driver for the Mechlands Vibe99 keyboard: RGB, integrated screen and clock, no proprietary GUI required."
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [{ name = "Andrea Brescia" }]
 keywords = [
@@ -29,6 +29,9 @@ classifiers = [
     "Operating System :: POSIX :: Linux",
     "Operating System :: Microsoft :: Windows",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
     "Topic :: System :: Hardware :: Universal Serial Bus (USB) :: Human Interface Device (HID)",
 ]
 
@@ -82,7 +85,7 @@ include = [
 
 [tool.ruff]
 line-length = 100
-target-version = "py39"
+target-version = "py310"
 src = ["src", "tests"]
 
 [tool.ruff.lint]

@@ -32,47 +32,53 @@ class DeviceId:
     usage_page: int | None = None
     usage: int | None = None
     interface_number: int | None = None
+    # Substring required in the USB product string for this entry to match.
+    # CRUCIAL for the Vibe99: it shares VID:PID 05ac:024f with real Apple
+    # keyboards, so we must also check the product string ("Mechlands Vibe99")
+    # to avoid ever talking to an actual Apple keyboard.
+    product_match: str | None = None
     notes: str = ""
 
     @property
     def vid_pid(self) -> str:
         return f"{self.vendor_id:04x}:{self.product_id:04x}"
 
-    def matches(self, vendor_id: int, product_id: int) -> bool:
-        return self.vendor_id == vendor_id and self.product_id == product_id
+    def matches(self, vendor_id: int, product_id: int, product: str = "") -> bool:
+        if self.vendor_id != vendor_id or self.product_id != product_id:
+            return False
+        if self.product_match is not None:
+            return self.product_match.lower() in (product or "").lower()
+        return True
 
 
 # --------------------------------------------------------------------------- #
-# The table. Order matters only for display; matching is by (vid, pid).
+# The table. CONFIRMED on real hardware (report descriptors read from sysfs).
+#
+# The Vibe99 is a SONiX-based keyboard that reuses Apple's VID:PID 05ac:024f.
+# We therefore REQUIRE the product string "Vibe99" so we never match a genuine
+# Apple keyboard sharing that ID. The wired keyboard reports product
+# "SONiX Mechlands Vibe99"; the 2.4G dongle reports "2.4G Wireless Receiver".
 # --------------------------------------------------------------------------- #
 KNOWN_DEVICES: list[DeviceId] = [
-    # Seeded from the AttackShark K86 reverse-engineering effort, which targets
-    # the same OEM web driver the Vibe99 is believed to share.
     DeviceId(
-        vendor_id=0x3151,
-        product_id=0x4011,
-        name="Mechlands Vibe99 (probable, shared OEM family)",
-        confidence="probable",
-        usage_page=0xFF00,
-        notes="Same family as controlhub.top/qmk.top WebHID devices.",
+        vendor_id=0x05AC,
+        product_id=0x024F,
+        name="Mechlands Vibe99 (wired, SONiX)",
+        confidence="confirmed",
+        usage_page=0xFF13,  # control interface; screen is on 0xFF68
+        usage=0x01,
+        product_match="vibe99",
+        notes="Confirmed via report descriptor: control=0xFF13, screen=0xFF68.",
     ),
     DeviceId(
-        vendor_id=0x3151,
-        product_id=0x4015,
-        name="Mechlands Vibe99 / sibling (probable)",
-        confidence="probable",
-        usage_page=0xFF00,
-        notes="Sibling PID observed on related screen keyboards.",
-    ),
-    # Placeholder for the wired-mode interface, which can enumerate under a
-    # different PID than the 2.4G dongle. Fill in once measured.
-    DeviceId(
-        vendor_id=0x3151,
-        product_id=0x4010,
-        name="Mechlands Vibe99 wired (guess)",
-        confidence="guess",
-        usage_page=0xFF00,
-        notes="Placeholder for the wired control interface; verify on hardware.",
+        vendor_id=0x05AC,
+        product_id=0x024F,
+        name="Mechlands Vibe99 (2.4G receiver, SONiX)",
+        confidence="confirmed",
+        usage_page=0xFF60,
+        usage=0x61,
+        product_match="2.4g wireless receiver",
+        notes="Wireless dongle; vendor reports are smaller. Prefer WIRED for config.",
     ),
 ]
 
@@ -81,10 +87,14 @@ KNOWN_DEVICES: list[DeviceId] = [
 KNOWN_VID_PID: set[tuple[int, int]] = {(d.vendor_id, d.product_id) for d in KNOWN_DEVICES}
 
 
-def lookup(vendor_id: int, product_id: int) -> DeviceId | None:
-    """Return the catalog entry for a (vid, pid) pair, if known."""
+def lookup(vendor_id: int, product_id: int, product: str = "") -> DeviceId | None:
+    """Return the catalog entry for a device, if known.
+
+    ``product`` is the USB product string; it is required to disambiguate the
+    Apple VID:PID collision (see :class:`DeviceId.product_match`).
+    """
     for dev in KNOWN_DEVICES:
-        if dev.matches(vendor_id, product_id):
+        if dev.matches(vendor_id, product_id, product):
             return dev
     return None
 

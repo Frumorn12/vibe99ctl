@@ -4,7 +4,7 @@
 
 [![CI](https://github.com/Frumorn12/vibe99ctl/actions/workflows/ci.yml/badge.svg)](https://github.com/Frumorn12/vibe99ctl/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/)
 
 ---
 
@@ -68,13 +68,13 @@ pip install -e ".[media-full]"   # + OpenCV
 ### Requirements
 
 **Linux**
-- Python 3.9+
+- Python 3.10+
 - `hidapi` system libs: `sudo apt install libhidapi-hidraw0` (Debian/Ubuntu) or
   the build headers `libudev-dev libusb-1.0-0-dev` if compiling the wheel.
 - A udev rule for non-root access (see [Troubleshooting](#troubleshooting)).
 
 **Windows**
-- Python 3.9+
+- Python 3.10+
 - The `hidapi` wheel bundles the DLL; no extra driver needed for HID access.
 - Put the keyboard in **wired** mode to configure it (same as the official tool).
 
@@ -117,7 +117,7 @@ vibe99 protocol ping --apply
 Targeting a specific device (e.g. when auto-detection is wrong):
 
 ```bash
-vibe99 --vid 0x3151 --pid 0x4011 rgb set blue --apply
+vibe99 --vid 0x05ac --pid 0x024f rgb set blue --apply
 vibe99 --path "/dev/hidraw3" info
 ```
 
@@ -153,13 +153,19 @@ Create a udev rule (replace the IDs with yours from `list-devices --all`):
 
 ```bash
 sudo tee /etc/udev/rules.d/99-vibe99.rules >/dev/null <<'EOF'
-# Mechlands Vibe99 (and OEM siblings) — allow user access to the HID interface
-KERNEL=="hidraw*", ATTRS{idVendor}=="3151", ATTRS{idProduct}=="4011", MODE="0660", TAG+="uaccess"
-SUBSYSTEM=="usb", ATTRS{idVendor}=="3151", ATTRS{idProduct}=="4011", MODE="0660", TAG+="uaccess"
+# Mechlands Vibe99 (SONiX) — shares Apple's 05ac:024f, so this rule also
+# loosens permissions on Apple keyboards with that ID. Adjust if that matters.
+KERNEL=="hidraw*", ATTRS{idVendor}=="05ac", ATTRS{idProduct}=="024f", MODE="0660", TAG+="uaccess"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="05ac", ATTRS{idProduct}=="024f", MODE="0660", TAG+="uaccess"
 EOF
 sudo udevadm control --reload-rules && sudo udevadm trigger
 ```
 Then re-plug the keyboard.
+
+> Note: on Linux the kernel binds this keyboard to the `apple` HID driver and
+> `hidapi` may report `usage_page = 0` for its interfaces, so interface
+> auto-selection by usage page works best on Windows. You can always pin an
+> interface with `--path` (find it via `vibe99 list-devices --all`).
 
 **`hidapi` import fails**
 Install the system lib (`libhidapi-hidraw0`) or the build headers, then
@@ -191,16 +197,24 @@ See the live matrix in [Overview](#what-it-does) and the detailed breakdown in
 
 ## Assumptions & limits
 
-- **Confirmed** (from official/marketing sources): 1.06" TFT; shows
+- **Confirmed** — official/marketing: 1.06" TFT; shows
   date/time/battery/connection/lock indicators; supports GIFs and animations
   built from JPG/PNG with text; configured over a **wired** connection; official
   driver is Windows-only.
-- **Probable** (from OEM-sibling devices / common practice): VID/PID family
-  `0x3151:0x40xx`; screen is RGB565, likely 240×240; image upload is chunked over
-  a 64-byte vendor HID report; on-device animation runs at only a few fps due to
-  USB Full-Speed bandwidth.
-- **To verify on real hardware**: exact VID/PID, report ID, opcodes, checksum
-  algorithm, screen resolution and pixel order, clock byte layout.
+- **Confirmed** — from the real device's HID report descriptors:
+  - USB identity **`05ac:024f`**, manufacturer **SONiX**, product
+    **"Mechlands Vibe99"** (it reuses Apple's VID:PID, so we also match the
+    product string to avoid touching real Apple keyboards).
+  - Two vendor interfaces: **control** = usage page `0xFF13` (64-byte
+    out/feature reports), **screen** = usage page `0xFF68` (**4096-byte** output
+    report for pixel data). No numbered Report ID.
+  - 2.4G mode exposes different, smaller vendor reports (`0xFF60`) — hence
+    config is done wired.
+- **Probable**: screen is RGB565, likely 240×240; on-device animation runs at
+  only a few fps due to USB Full-Speed bandwidth.
+- **To verify on real hardware**: the command opcodes, payload layouts and
+  checksum algorithm for RGB / screen / clock (needs a capture of the Windows or
+  WebHID driver's traffic), plus exact screen resolution and pixel order.
 
 Everything "probable"/"to verify" is centralised in `config.py` and the
 `protocol/` encoders, each marked with `# TO-VERIFY`, so confirming the protocol

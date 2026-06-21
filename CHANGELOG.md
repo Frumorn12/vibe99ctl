@@ -6,6 +6,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added / Changed
+- **Confirmed USB identity & transport from real hardware** (report descriptors):
+  device is `05ac:024f` (SONiX, reuses Apple's VID:PID — now disambiguated by
+  product string). Control interface = usage page `0xFF13` (64-byte reports),
+  screen interface = usage page `0xFF68` (**4096-byte** output report).
+- Screen pipeline now streams ~4 KB chunks (a 240×240 frame is ~31 reports,
+  down from ~2060).
+- Discovery selects the control interface by usage page and can locate the
+  screen interface; catalog requires the "Vibe99" product string.
+- Dropped Python 3.9 (EOL); minimum is now **3.10** (fixes runtime evaluation of
+  PEP 604 unions in Typer).
+- Documented the captured report descriptors in `docs/protocol.md` (Appendix A).
+
 ## [0.1.0] - 2026-06-21
 
 ### Added

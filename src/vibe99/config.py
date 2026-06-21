@@ -11,20 +11,33 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 # --------------------------------------------------------------------------- #
-# HID report geometry
+# HID report geometry  (CONFIRMED from the real Vibe99 report descriptors)
 # --------------------------------------------------------------------------- #
-# Most of these vendor keyboards expose a 64-byte output report on a
-# vendor-defined usage page. The first byte is frequently a Report ID.
+# The wired Vibe99 (VID:PID 05ac:024f, "SONiX Mechlands Vibe99") exposes TWO
+# vendor interfaces, decoded from /sys/.../report_descriptor:
 #
-# TO-VERIFY: confirm report length and whether a numbered Report ID is used.
-HID_REPORT_SIZE = 64
-HID_REPORT_ID = 0x00  # 0x00 means "no numbered report"; many devices use this.
+#   * Control channel  — usage page 0xFF13, usage 0x01:
+#       64-byte Input + 64-byte Output + 64-byte Feature, NO numbered Report ID.
+#       This carries commands (RGB, clock, settings).  ✅
+#   * Screen channel   — usage page 0xFF68, usage 0x61:
+#       64-byte Input + **4096-byte Output**, NO numbered Report ID.
+#       The big output report is the image/pixel pipe.  ✅
+#
+# In 2.4G wireless mode the vendor pages differ (0xFF60, smaller reports), which
+# is why the official tool requires WIRED mode to configure.  ✅
+HID_REPORT_SIZE = 64  # control channel output/feature report  ✅
+SCREEN_REPORT_SIZE = 4096  # screen channel output report  ✅
+HID_REPORT_ID = 0x00  # no numbered Report ID on either vendor interface  ✅
 
-# Vendor usage page used to single out the control interface among the several
-# HID interfaces a keyboard exposes (keyboard, consumer-control, vendor).
-# 0xFF00 is the most common vendor-defined page.
-# TO-VERIFY.
-VENDOR_USAGE_PAGE = 0xFF00
+# Usage pages used to single out the right interface among the keyboard's many
+# HID interfaces (boot keyboard, consumer control, mouse, vendor x2).
+CONTROL_USAGE_PAGE = 0xFF13  # ✅ commands (RGB / clock / settings)
+SCREEN_USAGE_PAGE = 0xFF68  # ✅ image/pixel upload
+# Wireless (2.4G) vendor page, for reference / future support.
+WIRELESS_USAGE_PAGE = 0xFF60  # ✅ (config still recommended over wired)
+
+# Backwards-compatible alias: "the" vendor control page.
+VENDOR_USAGE_PAGE = CONTROL_USAGE_PAGE
 
 
 @dataclass(frozen=True)

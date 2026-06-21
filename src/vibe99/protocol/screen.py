@@ -18,14 +18,19 @@ from __future__ import annotations
 import struct
 from collections.abc import Iterator
 
-from ..config import DEFAULT_SCREEN, HID_REPORT_SIZE, ScreenSpec
+from ..config import DEFAULT_SCREEN, SCREEN_REPORT_SIZE, ScreenSpec
 from ..errors import ValidationError
 from .packets import Opcode, Packet
 
-# Bytes of pixel data we can fit per DATA frame. Reserve room for the framing
-# header (opcode/sub/len/checksum) plus a small per-chunk sub-header.
-_CHUNK_SUBHEADER = 4  # chunk_index (u16) + reserved (u16)  # TO-VERIFY
-DATA_CHUNK_BYTES = HID_REPORT_SIZE - 4 - _CHUNK_SUBHEADER
+# The screen interface (vendor usage page 0xFF68) takes a 4096-byte output report
+# (confirmed from the report descriptor). We can therefore stream pixel data in
+# ~4 KB chunks instead of 64-byte dribbles: a 240x240 RGB565 frame (115200 B)
+# becomes ~29 reports rather than ~2000.
+#
+# Reserve room for the framing header (opcode/sub/len/checksum) plus a per-chunk
+# sub-header (chunk_index u16 + reserved u16). Exact layout is # TO-VERIFY.
+_CHUNK_SUBHEADER = 4
+DATA_CHUNK_BYTES = SCREEN_REPORT_SIZE - 4 - _CHUNK_SUBHEADER
 
 
 def _begin(spec: ScreenSpec, total_bytes: int, frame_index: int) -> Packet:
@@ -36,7 +41,9 @@ def _begin(spec: ScreenSpec, total_bytes: int, frame_index: int) -> Packet:
         total_bytes,
         frame_index & 0xFF,
     )
-    return Packet(Opcode.SCREEN_BEGIN, payload, description="screen begin")
+    return Packet(
+        Opcode.SCREEN_BEGIN, payload, description="screen begin", report_size=SCREEN_REPORT_SIZE
+    )
 
 
 def _data_chunks(buffer: bytes) -> Iterator[Packet]:
@@ -51,6 +58,7 @@ def _data_chunks(buffer: bytes) -> Iterator[Packet]:
             sub_header + chunk,
             sub=i & 0xFF,
             description=f"screen data chunk {i + 1}/{chunk_count}",
+            report_size=SCREEN_REPORT_SIZE,
         )
 
 
@@ -59,6 +67,7 @@ def _end(frame_index: int) -> Packet:
         Opcode.SCREEN_END,
         bytes([frame_index & 0xFF]),
         description="screen end/commit",
+        report_size=SCREEN_REPORT_SIZE,
     )
 
 

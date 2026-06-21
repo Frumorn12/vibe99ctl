@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ..config import VENDOR_USAGE_PAGE
+from ..config import CONTROL_USAGE_PAGE, SCREEN_USAGE_PAGE
 from ..errors import DeviceNotFoundError
 from ..logging_utils import get_logger
 from .descriptors import DeviceId, lookup
@@ -65,6 +65,7 @@ def _enumerate_raw() -> list[dict]:
 def _to_discovered(entry: dict) -> DiscoveredDevice:
     vid = int(entry.get("vendor_id", 0))
     pid = int(entry.get("product_id", 0))
+    product = str(entry.get("product_string") or "")
     return DiscoveredDevice(
         path=entry.get("path", b""),
         vendor_id=vid,
@@ -73,9 +74,9 @@ def _to_discovered(entry: dict) -> DiscoveredDevice:
         usage=int(entry.get("usage", 0)),
         interface_number=int(entry.get("interface_number", -1)),
         manufacturer=str(entry.get("manufacturer_string") or ""),
-        product=str(entry.get("product_string") or ""),
+        product=product,
         serial_number=str(entry.get("serial_number") or ""),
-        catalog=lookup(vid, pid),
+        catalog=lookup(vid, pid, product),
     )
 
 
@@ -97,11 +98,29 @@ def find_devices(include_unknown: bool = False) -> list[DiscoveredDevice]:
 
 
 def _rank(d: DiscoveredDevice) -> tuple:
-    """Sort key: prefer cataloged, vendor-interface, higher-confidence entries."""
+    """Sort key: prefer cataloged, control-interface, higher-confidence entries."""
     confidence_rank = {"confirmed": 0, "probable": 1, "guess": 2}
     conf = confidence_rank.get(d.catalog.confidence, 3) if d.catalog else 4
-    vendor_first = 0 if d.usage_page == VENDOR_USAGE_PAGE else (1 if d.is_vendor_interface else 2)
+    # The control channel (0xFF13) is the one we want for commands; rank it first,
+    # then any vendor interface, then everything else.
+    if d.usage_page == CONTROL_USAGE_PAGE:
+        vendor_first = 0
+    elif d.is_vendor_interface:
+        vendor_first = 1
+    else:
+        vendor_first = 2
     return (conf, vendor_first, d.interface_number)
+
+
+def find_screen_interface(
+    devices: list[DiscoveredDevice] | None = None,
+) -> DiscoveredDevice | None:
+    """Find the screen/image upload interface (vendor usage page 0xFF68)."""
+    candidates = devices if devices is not None else find_devices()
+    for d in candidates:
+        if d.usage_page == SCREEN_USAGE_PAGE:
+            return d
+    return None
 
 
 def select_control_interface(

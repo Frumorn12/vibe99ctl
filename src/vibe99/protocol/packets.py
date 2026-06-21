@@ -83,22 +83,26 @@ def build_report(
     return bytes([report_id & 0xFF]) + body
 
 
-def frame(opcode: int, payload: bytes = b"", *, sub: int = 0) -> bytes:
+def frame(opcode: int, payload: bytes = b"", *, sub: int = 0, size: int = HID_REPORT_SIZE) -> bytes:
     """Build a framed command body (without the leading Report ID byte).
 
-    The result is exactly ``HID_REPORT_SIZE`` bytes (the body), ready to be
-    handed to :func:`build_report`.
+    The result is exactly ``size`` bytes (the body), ready to be handed to
+    :func:`build_report`. ``size`` is the report length of the target interface:
+    64 for the control channel (0xFF13), 4096 for the screen channel (0xFF68).
+
+    Note: the length field is one byte, so payloads up to 255 bytes encode their
+    length exactly; larger screen chunks set it to 0xFF as a "full" marker
+    (# TO-VERIFY against a real capture of the screen pipe).
     """
-    if len(payload) > HID_REPORT_SIZE - 4:
+    if len(payload) > size - 4:
         raise ProtocolError(
-            f"Payload too long for a single frame: {len(payload)} bytes "
-            f"(max {HID_REPORT_SIZE - 4})."
+            f"Payload too long for a {size}-byte frame: {len(payload)} bytes (max {size - 4})."
         )
-    header = bytes([opcode & 0xFF, sub & 0xFF, len(payload) & 0xFF])
+    header = bytes([opcode & 0xFF, sub & 0xFF, min(len(payload), 0xFF)])
     without_checksum = header + bytes(payload)
     checksum = CHECKSUM(without_checksum)
     body = without_checksum + bytes([checksum])
-    return body + b"\x00" * (HID_REPORT_SIZE - len(body))
+    return body + b"\x00" * (size - len(body))
 
 
 @dataclass
@@ -114,14 +118,16 @@ class Packet:
     payload: bytes = b""
     sub: int = 0
     description: str = ""
+    # Report length of the target interface (64 = control, 4096 = screen).
+    report_size: int = HID_REPORT_SIZE
 
     def body(self) -> bytes:
         """The framed body (no leading Report ID)."""
-        return frame(self.opcode, self.payload, sub=self.sub)
+        return frame(self.opcode, self.payload, sub=self.sub, size=self.report_size)
 
     def to_report(self) -> bytes:
         """Full HID output report including the leading Report ID byte."""
-        return build_report(self.body())
+        return build_report(self.body(), size=self.report_size)
 
     def hex(self) -> str:
         return self.to_report().hex(" ")
