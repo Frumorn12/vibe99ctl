@@ -21,6 +21,7 @@ def test_first_usage_page_parses_real_descriptors():
     assert _first_usage_page(keyboard) == 0x0001
     assert _first_usage_page(b"") is None
 
+
 VIBE_VID = 0x05AC
 VIBE_PID = 0x024F
 
