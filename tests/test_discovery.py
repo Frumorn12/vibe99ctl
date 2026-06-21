@@ -3,11 +3,23 @@ from __future__ import annotations
 from vibe99.config import CONTROL_USAGE_PAGE, SCREEN_USAGE_PAGE
 from vibe99.device.descriptors import lookup
 from vibe99.device.discovery import (
+    _first_usage_page,
     enumerate_all,
     find_devices,
     find_screen_interface,
     select_control_interface,
 )
+
+
+def test_first_usage_page_parses_real_descriptors():
+    # Real bytes captured from a connected Vibe99 (docs/protocol.md Appendix A).
+    screen = bytes.fromhex("0668ff0961a101096215")  # 06 68 ff -> page 0xFF68
+    control = bytes.fromhex("0613ff0901a10115")  # 06 13 ff -> page 0xFF13
+    keyboard = bytes.fromhex("05010906a101")  # 05 01    -> page 0x0001
+    assert _first_usage_page(screen) == 0xFF68
+    assert _first_usage_page(control) == 0xFF13
+    assert _first_usage_page(keyboard) == 0x0001
+    assert _first_usage_page(b"") is None
 
 VIBE_VID = 0x05AC
 VIBE_PID = 0x024F

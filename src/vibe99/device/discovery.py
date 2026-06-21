@@ -9,7 +9,9 @@ page guess is wrong.
 
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass
+from pathlib import Path
 
 from ..config import CONTROL_USAGE_PAGE, SCREEN_USAGE_PAGE
 from ..errors import DeviceNotFoundError
@@ -62,18 +64,91 @@ def _enumerate_raw() -> list[dict]:
     return list(hid.enumerate())
 
 
+def _first_usage_page(data: bytes) -> int | None:
+    """Return the first Usage Page value declared in a HID report descriptor."""
+    i, n = 0, len(data)
+    while i < n:
+        prefix = data[i]
+        if prefix == 0xFE:  # long item: [0xFE, size, tag, data...]
+            size = data[i + 1] if i + 1 < n else 0
+            i += 3 + size
+            continue
+        size = prefix & 0x03
+        size = 4 if size == 3 else size
+        # Usage Page is a Global item (type 0b01) with tag 0b0000 => prefix 0x04|size.
+        if (prefix & 0xFC) == 0x04:
+            return int.from_bytes(data[i + 1 : i + 1 + size], "little") if size else 0
+        i += 1 + size
+    return None
+
+
+def _enrich_from_sysfs(
+    path: bytes, product: str, manufacturer: str, usage_page: int
+) -> tuple[str, str, int]:
+    """Fill in product/manufacturer/usage_page from sysfs on Linux.
+
+    On Linux the kernel may bind this keyboard to the ``apple`` driver, and
+    ``hidapi`` then reports an empty product string and ``usage_page = 0``. The
+    real values are still in sysfs; the hidapi path (e.g. ``3-4.4:1.0``) maps
+    directly to ``/sys/bus/usb/devices/<path>``. This never raises.
+    """
+    if not sys.platform.startswith("linux"):
+        return product, manufacturer, usage_page
+    try:
+        p = path.decode() if isinstance(path, bytes) else str(path)
+    except Exception:
+        return product, manufacturer, usage_page
+    if ":" not in p:
+        return product, manufacturer, usage_page
+
+    base = Path("/sys/bus/usb/devices")
+    iface_dir = base / p
+    dev_dir = base / p.split(":", 1)[0]
+
+    def _read(fp: Path) -> str:
+        try:
+            return fp.read_text().strip()
+        except OSError:
+            return ""
+
+    if not product:
+        product = _read(dev_dir / "product")
+    if not manufacturer:
+        manufacturer = _read(dev_dir / "manufacturer")
+    if not usage_page:
+        try:
+            for rd in iface_dir.glob("*/report_descriptor"):
+                up = _first_usage_page(rd.read_bytes())
+                if up:
+                    usage_page = up
+                    break
+        except OSError:
+            pass
+    return product, manufacturer, usage_page
+
+
 def _to_discovered(entry: dict) -> DiscoveredDevice:
     vid = int(entry.get("vendor_id", 0))
     pid = int(entry.get("product_id", 0))
+    path = entry.get("path", b"")
     product = str(entry.get("product_string") or "")
+    manufacturer = str(entry.get("manufacturer_string") or "")
+    usage_page = int(entry.get("usage_page", 0))
+
+    # hidapi on Linux (apple driver) often leaves these blank/zero; recover them.
+    if not product or not usage_page:
+        product, manufacturer, usage_page = _enrich_from_sysfs(
+            path, product, manufacturer, usage_page
+        )
+
     return DiscoveredDevice(
-        path=entry.get("path", b""),
+        path=path,
         vendor_id=vid,
         product_id=pid,
-        usage_page=int(entry.get("usage_page", 0)),
+        usage_page=usage_page,
         usage=int(entry.get("usage", 0)),
         interface_number=int(entry.get("interface_number", -1)),
-        manufacturer=str(entry.get("manufacturer_string") or ""),
+        manufacturer=manufacturer,
         product=product,
         serial_number=str(entry.get("serial_number") or ""),
         catalog=lookup(vid, pid, product),
