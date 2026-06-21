@@ -28,5 +28,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   implemented against a best-effort model and gated behind dry-run by default.
 - See `docs/assumptions-and-limits.md` for the confirmed / probable / to-verify matrix.
 
-[Unreleased]: https://github.com/USERNAME/vibe99ctl/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/USERNAME/vibe99ctl/releases/tag/v0.1.0
+[Unreleased]: https://github.com/Frumorn12/vibe99ctl/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/Frumorn12/vibe99ctl/releases/tag/v0.1.0

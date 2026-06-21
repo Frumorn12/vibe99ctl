@@ -17,7 +17,7 @@ solid skeleton into a fully working driver.
 ## Dev setup
 
 ```bash
-git clone https://github.com/USERNAME/vibe99ctl.git
+git clone https://github.com/Frumorn12/vibe99ctl.git
 cd vibe99ctl
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"        # add ,media for video work: ".[dev,media]"

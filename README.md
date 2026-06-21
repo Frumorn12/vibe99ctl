@@ -2,7 +2,7 @@
 
 **An open-source terminal driver for the Mechlands Vibe99 keyboard — control RGB, the integrated TFT screen, and the clock from your shell. No proprietary GUI required.**
 
-[![CI](https://github.com/USERNAME/vibe99ctl/actions/workflows/ci.yml/badge.svg)](https://github.com/USERNAME/vibe99ctl/actions/workflows/ci.yml)
+[![CI](https://github.com/Frumorn12/vibe99ctl/actions/workflows/ci.yml/badge.svg)](https://github.com/Frumorn12/vibe99ctl/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/)
 
@@ -55,7 +55,7 @@ refuse to pretend otherwise.
 
 ```bash
 # From source (recommended while in alpha)
-git clone https://github.com/USERNAME/vibe99ctl.git
+git clone https://github.com/Frumorn12/vibe99ctl.git
 cd vibe99ctl
 python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -e .

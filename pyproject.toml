@@ -59,10 +59,10 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/USERNAME/vibe99ctl"
-Repository = "https://github.com/USERNAME/vibe99ctl"
-Issues = "https://github.com/USERNAME/vibe99ctl/issues"
-Documentation = "https://github.com/USERNAME/vibe99ctl/tree/main/docs"
+Homepage = "https://github.com/Frumorn12/vibe99ctl"
+Repository = "https://github.com/Frumorn12/vibe99ctl"
+Issues = "https://github.com/Frumorn12/vibe99ctl/issues"
+Documentation = "https://github.com/Frumorn12/vibe99ctl/tree/main/docs"
 
 [project.scripts]
 vibe99 = "vibe99.cli:run"
