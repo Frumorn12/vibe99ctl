@@ -60,6 +60,7 @@ class HidTransport:
         hid = _import_hid()
         self._path = path
         self._dev = hid.device()
+        self._screen_dev = None
         try:
             self._dev.open_path(path)
             self._dev.set_nonblocking(False)
@@ -71,13 +72,35 @@ class HidTransport:
             ) from exc
         log.debug("Opened HID device at %r", path)
 
+        # Automatically open the sibling screen interface for Vibe99 if present
+        try:
+            opened_info = None
+            for d in hid.enumerate():
+                if d.get("path") == path:
+                    opened_info = d
+                    break
+            if opened_info and opened_info.get("vendor_id") == 0x05AC and opened_info.get("product_id") == 0x024F:
+                for d in hid.enumerate():
+                    if d.get("vendor_id") == 0x05AC and d.get("product_id") == 0x024F and d.get("usage_page") == 0xFF68:
+                        self._screen_dev = hid.device()
+                        self._screen_dev.open_path(d["path"])
+                        self._screen_dev.set_nonblocking(False)
+                        log.debug("Opened sibling screen HID interface at %r", d["path"])
+                        break
+        except Exception as e:
+            log.warning("Failed to auto-detect and open sibling screen interface: %s", e)
+
     def write(self, data: bytes) -> int:
         try:
-            written = self._dev.write(data)
+            if len(data) == 4097 and self._screen_dev is not None:
+                written = self._screen_dev.write(data)
+            else:
+                written = self._dev.write(data)
         except OSError as exc:
             raise TransportError(f"HID write failed: {exc}") from exc
         if written < 0:
-            raise TransportError("HID write returned -1 (device error).")
+            dev_err = self._screen_dev.error() if (len(data) == 4097 and self._screen_dev is not None) else self._dev.error()
+            raise TransportError(f"HID write returned -1 (device error: {dev_err}).")
         log.debug("WROTE %d bytes: %s", written, data.hex(" "))
         return written
 
@@ -108,6 +131,9 @@ class HidTransport:
     def close(self) -> None:
         with contextlib.suppress(Exception):
             self._dev.close()
+        if self._screen_dev is not None:
+            with contextlib.suppress(Exception):
+                self._screen_dev.close()
 
     def __enter__(self) -> HidTransport:
         return self

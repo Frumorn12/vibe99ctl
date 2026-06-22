@@ -120,9 +120,16 @@ class Packet:
     description: str = ""
     # Report length of the target interface (64 = control, 4096 = screen).
     report_size: int = HID_REPORT_SIZE
+    raw_body: bytes | None = None
 
     def body(self) -> bytes:
         """The framed body (no leading Report ID)."""
+        if self.raw_body is not None:
+            if len(self.raw_body) > self.report_size:
+                raise ProtocolError(
+                    f"Raw body of {len(self.raw_body)} bytes exceeds report size {self.report_size}."
+                )
+            return self.raw_body + b"\x00" * (self.report_size - len(self.raw_body))
         return frame(self.opcode, self.payload, sub=self.sub, size=self.report_size)
 
     def to_report(self) -> bytes:

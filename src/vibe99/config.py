@@ -49,8 +49,8 @@ class ScreenSpec:
     in this device class and is used as the default until measured.
     """
 
-    width: int = 240  # TO-VERIFY (probable)
-    height: int = 240  # TO-VERIFY (probable)
+    width: int = 96  # ✅
+    height: int = 160  # ✅
     # "rgb565-le" is by far the most common on SPI TFTs driven over HID.
     pixel_format: str = "rgb565-le"  # TO-VERIFY (probable)
 
@@ -83,5 +83,5 @@ MAX_ANIMATION_FRAMES = 120  # safety cap to avoid multi-MB uploads
 # --------------------------------------------------------------------------- #
 # Small inter-report delay (seconds) when streaming many chunks, to avoid
 # overrunning the device's receive buffer during a large screen upload.
-INTER_CHUNK_DELAY_S = 0.002  # TO-VERIFY (tune against real hardware)
+INTER_CHUNK_DELAY_S = 0.035  # Match official driver cmd_delaytime value=35
 READ_TIMEOUT_MS = 1000

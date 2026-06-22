@@ -128,4 +128,4 @@ def mode(
     value: Annotated[int, typer.Argument(min=0, max=255, help="Display mode index.")],
 ) -> None:
     """Switch the on-screen display mode (clock face / custom image / ...)."""
-    _send(ctx, [screen_proto.set_display_mode(value)], what=f"screen mode {value}", frames=0)
+    _send(ctx, screen_proto.set_display_mode(value), what=f"screen mode {value}", frames=0)

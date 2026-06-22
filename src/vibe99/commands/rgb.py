@@ -49,7 +49,7 @@ def set_color(
         raise fail(str(exc)) from exc
     _run(
         ctx,
-        [rgb_proto.set_solid_color(rgb, brightness=brightness)],
+        rgb_proto.set_solid_color(rgb, brightness=brightness),
         what=f"rgb set {rgb} @ {brightness}%",
     )
 
@@ -75,7 +75,7 @@ def preset(
             raise fail(str(exc)) from exc
     _run(
         ctx,
-        [rgb_proto.set_effect(effect, color=rgb, brightness=brightness, speed=speed)],
+        rgb_proto.set_effect(effect, color=rgb, brightness=brightness, speed=speed),
         what=f"rgb preset {key}",
     )
 
@@ -86,13 +86,13 @@ def brightness(
     value: Annotated[int, typer.Argument(min=0, max=100, help="Brightness 0-100.")],
 ) -> None:
     """Set only the global brightness."""
-    _run(ctx, [rgb_proto.set_brightness(value)], what=f"rgb brightness {value}%")
+    _run(ctx, rgb_proto.set_brightness(value), what=f"rgb brightness {value}%")
 
 
 @app.command("off")
 def off(ctx: typer.Context) -> None:
     """Turn the backlight off."""
-    _run(ctx, [rgb_proto.turn_off()], what="rgb off")
+    _run(ctx, rgb_proto.turn_off(), what="rgb off")
 
 
 @app.command("presets")

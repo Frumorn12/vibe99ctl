@@ -1,74 +1,76 @@
 """Screen (TFT) command encoders.
 
-The Vibe99 has a 1.06" TFT. Uploading a frame to this class of device almost
-always follows a three-phase pattern over HID:
-
-    BEGIN  -> announce a transfer (dimensions, total size, mode, frame index)
-    DATA   -> stream the pixel buffer in fixed-size chunks (with chunk index)
-    END    -> commit / display
-
-This module turns a raw pixel buffer (already in the device's pixel format, see
-:mod:`vibe99.media.image`) into the corresponding sequence of packets. The
-opcodes and header fields are ``# TO-VERIFY``; the *shape* is correct for the
-device class.
+Implements the Mechlands Vibe99 TFT protocol.
 """
 
 from __future__ import annotations
 
-import struct
 from collections.abc import Iterator
 
-from ..config import DEFAULT_SCREEN, SCREEN_REPORT_SIZE, ScreenSpec
+from ..config import DEFAULT_SCREEN, ScreenSpec
 from ..errors import ValidationError
-from .packets import Opcode, Packet
-
-# The screen interface (vendor usage page 0xFF68) takes a 4096-byte output report
-# (confirmed from the report descriptor). We can therefore stream pixel data in
-# ~4 KB chunks instead of 64-byte dribbles: a 240x240 RGB565 frame (115200 B)
-# becomes ~29 reports rather than ~2000.
-#
-# Reserve room for the framing header (opcode/sub/len/checksum) plus a per-chunk
-# sub-header (chunk_index u16 + reserved u16). Exact layout is # TO-VERIFY.
-_CHUNK_SUBHEADER = 4
-DATA_CHUNK_BYTES = SCREEN_REPORT_SIZE - 4 - _CHUNK_SUBHEADER
+from .packets import Packet
 
 
-def _begin(spec: ScreenSpec, total_bytes: int, frame_index: int) -> Packet:
-    payload = struct.pack(
-        "<HHIB",
-        spec.width,
-        spec.height,
-        total_bytes,
-        frame_index & 0xFF,
-    )
-    return Packet(
-        Opcode.SCREEN_BEGIN, payload, description="screen begin", report_size=SCREEN_REPORT_SIZE
-    )
-
-
-def _data_chunks(buffer: bytes) -> Iterator[Packet]:
-    total = len(buffer)
-    chunk_count = (total + DATA_CHUNK_BYTES - 1) // DATA_CHUNK_BYTES
-    for i in range(chunk_count):
-        start = i * DATA_CHUNK_BYTES
-        chunk = buffer[start : start + DATA_CHUNK_BYTES]
-        sub_header = struct.pack("<HH", i, 0)
-        yield Packet(
-            Opcode.SCREEN_DATA,
-            sub_header + chunk,
-            sub=i & 0xFF,
-            description=f"screen data chunk {i + 1}/{chunk_count}",
-            report_size=SCREEN_REPORT_SIZE,
+def _make_screen_packets(
+    frames: list[bytes],
+    *,
+    spec: ScreenSpec = DEFAULT_SCREEN,
+    delay_units: int = 30, # 60ms default
+    mode: int = 2, # 2 = static, 3 = animation
+) -> list[Packet]:
+    """Helper to package frames and header into the exact Vibe99 stream sequence."""
+    num_frames = len(frames)
+    
+    # 1. Build the 256-byte GIF/animation header
+    header = bytearray(256)
+    header[0] = num_frames & 0xFF
+    for i in range(num_frames):
+        header[1 + i] = delay_units & 0xFF
+    for i in range(num_frames, 255):
+        header[1 + i] = 0xFF
+        
+    # 2. Concatenate header and raw pixel buffers
+    full_payload = bytes(header) + b"".join(frames)
+    
+    # 3. Calculate number of 4096-byte chunks
+    num_chunks = (len(full_payload) + 4095) // 4096
+    
+    # 4. Assemble the packet sequence
+    # Start/unlock command
+    p1 = Packet(0, raw_body=b"\x04\x18", description="screen upload start 1")
+    
+    # Screen init command with mode and chunk count
+    init_body = bytearray(64)
+    init_body[0] = 0x04
+    init_body[1] = 0x72
+    init_body[2] = mode & 0xFF
+    init_body[8] = num_chunks & 0xFF
+    init_body[9] = (num_chunks >> 8) & 0xFF
+    p2 = Packet(0, raw_body=bytes(init_body), description="screen upload init")
+    
+    packets = [p1, p2]
+    
+    # Pixel data chunks (size 4096)
+    for i in range(num_chunks):
+        start = i * 4096
+        chunk_data = full_payload[start : start + 4096]
+        if len(chunk_data) < 4096:
+            chunk_data = chunk_data + b"\x00" * (4096 - len(chunk_data))
+        packets.append(
+            Packet(
+                0,
+                raw_body=chunk_data,
+                report_size=4096,
+                description=f"screen chunk {i+1}/{num_chunks}",
+            )
         )
-
-
-def _end(frame_index: int) -> Packet:
-    return Packet(
-        Opcode.SCREEN_END,
-        bytes([frame_index & 0xFF]),
-        description="screen end/commit",
-        report_size=SCREEN_REPORT_SIZE,
-    )
+        
+    # Commit/finish command
+    p3 = Packet(0, raw_body=b"\x04\x02", description="screen upload commit")
+    packets.append(p3)
+    
+    return packets
 
 
 def upload_frame(
@@ -77,21 +79,14 @@ def upload_frame(
     spec: ScreenSpec = DEFAULT_SCREEN,
     frame_index: int = 0,
 ) -> list[Packet]:
-    """Build the full packet sequence to upload one frame buffer.
-
-    :param buffer: raw pixel bytes in the device's pixel format. Its length must
-        match ``spec.frame_bytes``.
-    """
+    """Build the packet sequence to upload one frame buffer."""
     if len(buffer) != spec.frame_bytes:
         raise ValidationError(
             f"Frame buffer is {len(buffer)} bytes but screen expects "
             f"{spec.frame_bytes} ({spec.width}x{spec.height} "
             f"{spec.pixel_format})."
         )
-    packets: list[Packet] = [_begin(spec, len(buffer), frame_index)]
-    packets.extend(_data_chunks(buffer))
-    packets.append(_end(frame_index))
-    return packets
+    return _make_screen_packets([buffer], spec=spec, delay_units=30, mode=2)
 
 
 def upload_animation(
@@ -100,29 +95,28 @@ def upload_animation(
     spec: ScreenSpec = DEFAULT_SCREEN,
     fps: int = 5,
 ) -> list[Packet]:
-    """Build the packet sequence to upload a multi-frame animation.
-
-    The animation is sent frame-by-frame using :func:`upload_frame` with an
-    incrementing frame index, bracketed by a mode packet that declares the frame
-    count and playback rate. (Whether the device stores animations on-board or
-    needs the host to drive playback is ``# TO-VERIFY``; storing on-board is the
-    documented Vibe99 behaviour for GIFs.)
-    """
+    """Build the packet sequence to upload a multi-frame animation."""
     if not frames:
         raise ValidationError("Animation has no frames.")
-    mode = Packet(
-        Opcode.SCREEN_MODE,
-        struct.pack("<BB", len(frames) & 0xFF, fps & 0xFF),
-        description="screen animation mode",
-    )
-    packets: list[Packet] = [mode]
-    for idx, frame in enumerate(frames):
-        packets.extend(upload_frame(frame, spec=spec, frame_index=idx))
-    return packets
+    for f in frames:
+        if len(f) != spec.frame_bytes:
+            raise ValidationError(
+                f"Frame buffer is {len(f)} bytes but screen expects "
+                f"{spec.frame_bytes}."
+            )
+            
+    delay_ms = int(round(1000.0 / fps))
+    delay_units = max(1, min(255, delay_ms // 2))
+    return _make_screen_packets(frames, spec=spec, delay_units=delay_units, mode=3)
 
 
-def set_display_mode(mode: int) -> Packet:
+def set_display_mode(mode: int) -> list[Packet]:
     """Switch the on-screen display mode (clock face, custom image, etc.)."""
-    return Packet(
-        Opcode.SCREEN_MODE, bytes([mode & 0xFF]), sub=0xFF, description=f"screen mode {mode}"
+    p0 = Packet(0, raw_body=b"\x04\xf0", description="screen mode start")
+    p1 = Packet(
+        0,
+        raw_body=bytes([0x04, 0xf5, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, mode & 0xFF]),
+        description=f"screen mode {mode}",
     )
+    p2 = Packet(0, raw_body=b"\x04\x02", description="screen mode commit")
+    return [p0, p1, p2]

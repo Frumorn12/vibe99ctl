@@ -35,6 +35,16 @@ def test_rgb_set_invalid_color():
     assert result.exit_code != 0
 
 
+def test_screen_upload_image_dry_run(fake_hid_enumeration, tmp_path):
+    from PIL import Image
+    fake_hid_enumeration([])
+    img_path = tmp_path / "test.png"
+    Image.new("RGB", (10, 10), (255, 0, 0)).save(img_path)
+    result = runner.invoke(app, ["screen", "upload-image", str(img_path)])
+    assert result.exit_code == 0
+    assert "screen upload-image" in result.output.lower()
+
+
 def test_clock_sync_dry_run(fake_hid_enumeration):
     fake_hid_enumeration([])
     result = runner.invoke(app, ["clock", "sync"])

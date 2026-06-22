@@ -38,11 +38,11 @@ def sync(
         except ValueError as exc:
             raise fail(f"Invalid --at value {at!r}: {exc}") from exc
 
-    packet = clock_proto.sync(when)
+    packets = clock_proto.sync(when)
     state = get_state(ctx)
     device, transport, dry_run = resolve_write_transport(state)
     try:
-        result = send_packets(transport, [packet], dry_run=dry_run)
+        result = send_packets(transport, packets, dry_run=dry_run)
     finally:
         transport.close()
 

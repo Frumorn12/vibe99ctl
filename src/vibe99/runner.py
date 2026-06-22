@@ -52,9 +52,20 @@ def send_packets(
         if dry_run:
             log.debug("[dry-run] %s", pkt.description)
         else:
-            transport.write(report)
-            if delay_s:
-                time.sleep(delay_s)
+            if pkt.report_size == 64:
+                transport.send_feature_report(report)
+                try:
+                    transport.get_feature_report(0, 65)
+                except Exception as exc:
+                    log.warning("Feature report readback handshake failed: %s", exc)
+                if "screen upload" in (pkt.description or ""):
+                    time.sleep(0.2)  # Give the device time to process setup/init commands
+                elif delay_s:
+                    time.sleep(delay_s)
+            else:
+                transport.write(report)
+                if delay_s:
+                    time.sleep(delay_s)
         result.packets_sent += 1
         result.bytes_sent += len(report)
 
