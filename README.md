@@ -8,13 +8,14 @@
 
 ---
 
-> ⚠️ **Honest status up front.** The Vibe99 wire protocol is **not officially
-> documented** and is **not yet confirmed on real hardware**. This project ships
-> a complete, well-tested architecture and a *best-effort* protocol model derived
-> from sibling devices in the same OEM family. **Write commands run in dry-run by
-> default** and only send to the keyboard when you pass `--apply`. See
-> [Assumptions & limits](#assumptions--limits) and
-> [`docs/assumptions-and-limits.md`](docs/assumptions-and-limits.md).
+> **Status.** The **screen works on real hardware**: static images, GIFs and
+> videos (converted to an on-device animation), verified on a wired Vibe99. The
+> protocol (`04 18` → `04 72` → 4 KB chunks, each ACKed → `04 02`) and the
+> screen geometry (96×160 RGB565) are confirmed; see
+> [`docs/protocol.md`](docs/protocol.md). **RGB lighting** (20 built-in effects,
+> color/rainbow, brightness, speed, direction) is verified too, and the clock
+> sync is accepted by the keyboard. In the CLI, write commands still run in
+> **dry-run** by default and only send with `--apply`.
 
 ## Overview
 
@@ -30,26 +31,31 @@ screen, and sync the clock.
 
 | Feature | Command | Status |
 |---|---|---|
-| RGB: solid color | `vibe99 rgb set` | 🟡 encoder built, protocol to verify |
-| RGB: effects/presets | `vibe99 rgb preset` | 🟡 encoder built, protocol to verify |
-| RGB: brightness / off | `vibe99 rgb brightness` / `off` | 🟡 encoder built |
-| Screen: static image | `vibe99 screen upload-image` | 🟡 pipeline built, protocol to verify |
-| Screen: animation (GIF) | `vibe99 screen upload-animation` | 🟡 pipeline built |
-| Screen: video → animation | `vibe99 screen upload-video` | 🟡 **converts** (no native video) |
-| Clock sync | `vibe99 clock sync` | 🟡 encoder built |
+| Desktop app: screen gallery + GIF store, lights, clock | `vibe99 gui` | 🟢 works today |
+| Screen: static image | `vibe99 screen upload-image` | 🟢 verified on hardware |
+| Screen: animation (GIF) | `vibe99 screen upload-animation` | 🟢 verified (keeps GIF timing) |
+| Screen: video → animation | `vibe99 screen upload-video` | 🟢 **converts** (no native video) |
+| Clock sync | `vibe99 clock sync` | 🟡 accepted by the keyboard |
+| RGB: solid color | `vibe99 rgb set` | 🟢 verified on hardware |
+| RGB: 20 effects, rainbow/color, speed, direction | `vibe99 rgb preset` | 🟢 verified |
+| RGB: brightness / off | `vibe99 rgb brightness` / `off` | 🟢 same encoder |
 | Device discovery | `vibe99 list-devices` / `info` | 🟢 works today |
 | Diagnostics | `vibe99 doctor` | 🟢 works today |
 | RE helpers | `vibe99 protocol ...` / `dump-descriptor` | 🟢 works today |
 
-🟢 = works now · 🟡 = implemented, needs a hardware capture to confirm the bytes
+🟢 = verified on a real Vibe99 · 🟡 = implemented, effect not yet verified
 
 ### About "video" support — read this
 
-The Vibe99 **does not play real video**. Its firmware accepts still images and
-**GIF/animation frames**. `vibe99 screen upload-video` therefore **converts** a
-video into a short, low-fps frame sequence and uploads it as an animation. The
-result is intentionally choppy — that's a hardware limitation, not a bug, and we
-refuse to pretend otherwise.
+The Vibe99 **does not play real video**. It stores **up to 255 frames** in
+flash, each with its own delay (2 ms steps), and loops them smoothly. So
+`vibe99 screen upload-video` takes a stretch of your video (`--start`, `--fps`,
+`--max-frames`; default 100 frames at 15 fps ≈ 6.5 s), fits it to the 96×160
+screen and uploads it as an animation.
+
+Uploading is the slow part: the keyboard is USB Full-Speed and writes every
+4 KB chunk to flash before acknowledging it, so it takes **~1.1 s per frame**
+(100 frames ≈ 2 minutes). The keyboard keeps working while it uploads.
 
 ## Installation
 
@@ -63,7 +69,21 @@ pip install -e .
 # Optional: enable real video conversion (mp4/webm/...). GIFs work without this.
 pip install -e ".[media]"        # imageio + ffmpeg
 pip install -e ".[media-full]"   # + OpenCV
+pip install -e ".[gui]"          # the gallery (PyQt6); or use your distro's PyQt6
 ```
+
+On Linux, let your user talk to the keyboard without root (the rule only
+matches devices whose product name contains "Vibe99", so a real Apple keyboard
+with the same ID is left alone):
+
+```bash
+sudo install -m 644 data/70-vibe99.rules /etc/udev/rules.d/
+sudo udevadm control --reload && sudo udevadm trigger --subsystem-match=hidraw
+```
+
+Optional desktop launcher: copy `data/vibe99.desktop` to
+`~/.local/share/applications/` and `data/vibe99.svg` to
+`~/.local/share/icons/hicolor/scalable/apps/`.
 
 ### Requirements
 
@@ -123,6 +143,34 @@ vibe99 --path "/dev/hidraw3" info
 
 See [`examples/`](examples/) for copy-paste recipes.
 
+## Gallery (GUI)
+
+```bash
+vibe99 gui
+```
+
+A desktop app with three pages:
+
+**Schermo** — two tabs and a live preview:
+
+- **Libreria** — your GIFs and videos (`~/.local/share/vibe99/libreria`). Add
+  files, open the folder, delete.
+- **Store** — search GIFs and transparent stickers online (Tenor) by keyword,
+  with one-click suggestions. Anything you upload is saved to the library.
+- **Preview** — shows the exact frames that will be uploaded at screen size,
+  with framing (fit/crop/stretch), frame cap, and for videos the speed and
+  start time, plus an upload-time estimate. *Metti sulla tastiera* uploads with
+  a progress bar.
+
+**Luci** — the 20 built-in effects (named as in the official driver), rainbow or
+one of the color swatches / any color, brightness and speed sliders (0-5) and
+direction. Changes are applied to the keyboard live and remembered.
+
+**Tastiera** — clock sync (also automatic when you plug the keyboard in while
+the app is open), restore the stock Mechlands animation, connection status.
+
+The window follows the current Omarchy theme colors when available.
+
 ## Examples (CLI)
 
 ```bash
@@ -149,23 +197,13 @@ vibe99 clock sync --apply
   [open a protocol issue](.github/ISSUE_TEMPLATE/protocol_capture.md).
 
 **Linux: `open failed / access denied`**
-Create a udev rule (replace the IDs with yours from `list-devices --all`):
+Install the udev rule from [Installation](#installation) (`data/70-vibe99.rules`)
+and re-plug the keyboard.
 
-```bash
-sudo tee /etc/udev/rules.d/99-vibe99.rules >/dev/null <<'EOF'
-# Mechlands Vibe99 (SONiX) — shares Apple's 05ac:024f, so this rule also
-# loosens permissions on Apple keyboards with that ID. Adjust if that matters.
-KERNEL=="hidraw*", ATTRS{idVendor}=="05ac", ATTRS{idProduct}=="024f", MODE="0660", TAG+="uaccess"
-SUBSYSTEM=="usb", ATTRS{idVendor}=="05ac", ATTRS{idProduct}=="024f", MODE="0660", TAG+="uaccess"
-EOF
-sudo udevadm control --reload-rules && sudo udevadm trigger
-```
-Then re-plug the keyboard.
-
-> Note: on Linux the kernel binds this keyboard to the `apple` HID driver and
-> `hidapi` may report `usage_page = 0` for its interfaces, so interface
-> auto-selection by usage page works best on Windows. You can always pin an
-> interface with `--path` (find it via `vibe99 list-devices --all`).
+> Note: on Linux vibe99ctl uses hidapi's **hidraw** backend (the `hidraw`
+> module bundled with the `hidapi` wheel). The default libusb backend can't see
+> the product string or usage pages while the kernel's `apple` driver owns the
+> keyboard, and needs raw USB access.
 
 **`hidapi` import fails**
 Install the system lib (`libhidapi-hidraw0`) or the build headers, then
@@ -210,11 +248,14 @@ See the live matrix in [Overview](#what-it-does) and the detailed breakdown in
     report for pixel data). No numbered Report ID.
   - 2.4G mode exposes different, smaller vendor reports (`0xFF60`) — hence
     config is done wired.
-- **Probable**: screen is RGB565, likely 240×240; on-device animation runs at
-  only a few fps due to USB Full-Speed bandwidth.
-- **To verify on real hardware**: the command opcodes, payload layouts and
-  checksum algorithm for RGB / screen / clock (needs a capture of the Windows or
-  WebHID driver's traffic), plus exact screen resolution and pixel order.
+- **Confirmed** — on hardware and in the official driver's config: screen is
+  **96×160 RGB565 little-endian**, row-major; animations hold up to **255
+  frames** with per-frame delays; the full screen upload sequence and its
+  per-chunk ACK (see [`docs/protocol.md`](docs/protocol.md)).
+- **Confirmed** — RGB lighting packet and effect list (see
+  [`docs/protocol.md`](docs/protocol.md)).
+- **To verify**: the exact clock byte layout (accepted and echoed by the
+  keyboard).
 
 Everything "probable"/"to verify" is centralised in `config.py` and the
 `protocol/` encoders, each marked with `# TO-VERIFY`, so confirming the protocol

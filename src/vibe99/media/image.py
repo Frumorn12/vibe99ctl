@@ -24,6 +24,14 @@ def to_rgb565(image: Image.Image, *, little_endian: bool = True) -> bytes:
     if image.mode != "RGB":
         image = image.convert("RGB")
     raw = image.tobytes()  # tightly packed RGB, 3 bytes per pixel
+    try:
+        import numpy as np  # comes with the [media] extra; ~100x faster
+    except ImportError:
+        np = None
+    if np is not None:
+        px = np.frombuffer(raw, dtype=np.uint8).reshape(-1, 3).astype(np.uint16)
+        value = ((px[:, 0] & 0xF8) << 8) | ((px[:, 1] & 0xFC) << 3) | (px[:, 2] >> 3)
+        return value.astype("<u2" if little_endian else ">u2").tobytes()
     pack = _PACK_LE if little_endian else _PACK_BE
     out = bytearray()
     for i in range(0, len(raw), 3):
@@ -37,13 +45,13 @@ def _fit(image: Image.Image, spec: ScreenSpec, *, fit: str) -> Image.Image:
     """Resize ``image`` to the screen size using the chosen strategy."""
     target = (spec.width, spec.height)
     if fit == "stretch":
-        return image.resize(target, Image.LANCZOS)
+        return image.resize(target, Image.Resampling.LANCZOS)
     if fit == "contain":
         # Letterbox: preserve aspect ratio, pad with black.
-        return ImageOps.pad(image, target, color=(0, 0, 0), method=Image.LANCZOS)
+        return ImageOps.pad(image, target, color=(0, 0, 0), method=Image.Resampling.LANCZOS)
     if fit == "cover":
         # Crop to fill: preserve aspect ratio, center-crop the overflow.
-        return ImageOps.fit(image, target, method=Image.LANCZOS)
+        return ImageOps.fit(image, target, method=Image.Resampling.LANCZOS)
     raise MediaError(f"Unknown fit mode {fit!r}. Use stretch|contain|cover.")
 
 

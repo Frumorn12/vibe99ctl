@@ -6,6 +6,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Screen works on real hardware
+- **Fixed the screen upload** (images, GIFs, videos), verified on a wired
+  Vibe99: upload command byte 2 is `gif_count` = 1 (not a 2/3 "mode"), the data
+  is `0xFF`-padded, and the host now **waits for the keyboard's per-chunk ACK**
+  (`01 5a 02`) on the screen interface instead of firing chunks blindly.
+- Linux: use hidapi's **hidraw** backend. The libusb backend could not see the
+  product string / usage pages under the `apple` driver and bypassed the udev
+  rule.
+- Screen geometry and limits confirmed from the official driver config:
+  96×160 RGB565 LE, up to 255 frames, delays in 2 ms units.
+- GIFs keep their own per-frame timing (subsampling merges delays).
+- Videos: decoded by ffmpeg, streamed, sampled at `--fps` from `--start` for
+  `--max-frames` frames. Previously the whole video was decoded into memory and
+  120 frames were spread over its full length.
+- Fast RGB565 conversion with numpy when available.
+- Upload progress bar and missing-ACK warning in the CLI; dry-run no longer
+  dumps every data chunk.
+
+### Lights work on real hardware
+- **Fixed the RGB packet**: `[0] effect [1..3] RGB [8] rainbow [9] brightness
+  [10] speed [11] direction [14..15] AA 55` (there was a spurious byte before
+  RGB), followed by `04 02` and `04 F0`; no readback for the payload and apply
+  packets (new `Packet.readback`). Verified with static green.
+- The 20 real effects from the official driver (0 off … 11 Rolling = factory
+  default … 19 Shuttle), all usable by name in `vibe99 rgb preset`; old preset
+  names kept as aliases. New `--reverse` for direction.
+
+### Added
+- **`vibe99 gui`**: desktop app with three pages: *Schermo* (local library,
+  online GIF/sticker store via Tenor search, live screen-size preview,
+  one-click upload), *Luci* (effects, colors, brightness, speed, direction,
+  applied live) and *Tastiera* (clock sync, auto-sync on plug-in, stock
+  animation, status). Follows the Omarchy theme colors.
+- `data/70-vibe99.rules` (udev), `data/vibe99.desktop`, `data/vibe99.svg`.
+- Tests for the runner ACK handling, GIF timing, video sampling and RGB layout.
+
+### Fixed
+- Ruff lint errors left by the previous commit (CI).
+
 ### Added / Changed
 - **Confirmed USB identity & transport from real hardware** (report descriptors):
   device is `05ac:024f` (SONiX, reuses Apple's VID:PID — now disambiguated by

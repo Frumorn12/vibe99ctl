@@ -15,8 +15,10 @@ care which one they're talking to.
 from __future__ import annotations
 
 import contextlib
+import sys
 from typing import Protocol, runtime_checkable
 
+from ..config import SCREEN_USAGE_PAGE, VIBE99_PID, VIBE99_VID
 from ..errors import DeviceOpenError, TransportError
 from ..logging_utils import get_logger
 
@@ -35,13 +37,31 @@ class Transport(Protocol):
 
     def get_feature_report(self, report_id: int, size: int) -> bytes: ...
 
+    def read_screen_ack(self, timeout_ms: int) -> bytes:
+        """Read the screen interface's per-chunk ACK (``b""`` on timeout)."""
+
     def send_feature_report(self, data: bytes) -> int: ...
 
     def close(self) -> None: ...
 
 
 def _import_hid():
-    """Import the optional ``hid`` module lazily with a helpful error."""
+    """Import the optional ``hidapi`` bindings lazily with a helpful error.
+
+    On Linux we prefer the ``hidraw`` backend that ships in the same wheel: it
+    goes through ``/dev/hidraw*`` (so the udev rule grants access without root),
+    reports the real product string and usage page even while the kernel binds
+    the keyboard to the ``apple`` driver, and never detaches the kernel driver.
+    The default ``hid`` module on Linux is the libusb backend, which sees
+    neither and needs raw USB access.
+    """
+    if sys.platform.startswith("linux"):
+        try:
+            import hidraw  # type: ignore
+
+            return hidraw
+        except ImportError:  # pragma: no cover - environment dependent
+            pass
     try:
         import hid  # type: ignore
     except ImportError as exc:  # pragma: no cover - environment dependent
@@ -72,21 +92,18 @@ class HidTransport:
             ) from exc
         log.debug("Opened HID device at %r", path)
 
-        # Automatically open the sibling screen interface for Vibe99 if present
+        # The pixel pipe is a sibling interface (usage page 0xFF68) of the same
+        # keyboard; open it too so 4096-byte screen chunks can be routed there.
         try:
-            opened_info = None
-            for d in hid.enumerate():
-                if d.get("path") == path:
-                    opened_info = d
+            for d in hid.enumerate(VIBE99_VID, VIBE99_PID):
+                product = d.get("product_string") or ""
+                is_screen = d.get("usage_page") == SCREEN_USAGE_PAGE
+                if is_screen and (not product or "Vibe99" in product):
+                    self._screen_dev = hid.device()
+                    self._screen_dev.open_path(d["path"])
+                    self._screen_dev.set_nonblocking(False)
+                    log.debug("Opened sibling screen HID interface at %r", d["path"])
                     break
-            if opened_info and opened_info.get("vendor_id") == 0x05AC and opened_info.get("product_id") == 0x024F:
-                for d in hid.enumerate():
-                    if d.get("vendor_id") == 0x05AC and d.get("product_id") == 0x024F and d.get("usage_page") == 0xFF68:
-                        self._screen_dev = hid.device()
-                        self._screen_dev.open_path(d["path"])
-                        self._screen_dev.set_nonblocking(False)
-                        log.debug("Opened sibling screen HID interface at %r", d["path"])
-                        break
         except Exception as e:
             log.warning("Failed to auto-detect and open sibling screen interface: %s", e)
 
@@ -99,7 +116,8 @@ class HidTransport:
         except OSError as exc:
             raise TransportError(f"HID write failed: {exc}") from exc
         if written < 0:
-            dev_err = self._screen_dev.error() if (len(data) == 4097 and self._screen_dev is not None) else self._dev.error()
+            to_screen = len(data) == 4097 and self._screen_dev is not None
+            dev_err = self._screen_dev.error() if to_screen else self._dev.error()
             raise TransportError(f"HID write returned -1 (device error: {dev_err}).")
         log.debug("WROTE %d bytes: %s", written, data.hex(" "))
         return written
@@ -113,6 +131,15 @@ class HidTransport:
         if out:
             log.debug("READ  %d bytes: %s", len(out), out.hex(" "))
         return out
+
+    def read_screen_ack(self, timeout_ms: int) -> bytes:
+        """Wait for the 64-byte ACK the screen interface sends after each chunk."""
+        if self._screen_dev is None:
+            return b""
+        try:
+            return bytes(self._screen_dev.read(64, timeout_ms))
+        except OSError as exc:
+            raise TransportError(f"HID read on the screen interface failed: {exc}") from exc
 
     def get_feature_report(self, report_id: int, size: int) -> bytes:
         try:
@@ -167,6 +194,9 @@ class DryRunTransport:
     def get_feature_report(self, report_id: int, size: int) -> bytes:
         if self._canned_reads:
             return self._canned_reads.pop(0)[:size]
+        return b""
+
+    def read_screen_ack(self, timeout_ms: int) -> bytes:
         return b""
 
     def send_feature_report(self, data: bytes) -> int:

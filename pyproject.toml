@@ -55,6 +55,11 @@ media-full = [
     "imageio-ffmpeg>=0.4.9",
     "opencv-python-headless>=4.8",
 ]
+# Desktop gallery (`vibe99 gui`).
+gui = [
+    "PyQt6>=6.5",
+    "numpy>=1.24",
+]
 dev = [
     "pytest>=8.0",
     "pytest-cov>=5.0",
@@ -69,6 +74,9 @@ Documentation = "https://github.com/Frumorn12/vibe99ctl/tree/main/docs"
 
 [project.scripts]
 vibe99 = "vibe99.cli:run"
+
+[project.gui-scripts]
+vibe99-gui = "vibe99.gui.app:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/vibe99"]

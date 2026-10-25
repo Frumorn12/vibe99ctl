@@ -1,10 +1,9 @@
 # Vibe99 protocol notes
 
-> **Status: PARTIALLY CONFIRMED.** The USB identity and the HID transport
-> (interfaces, usage pages, report sizes) are confirmed from a real device's
-> report descriptors (see Appendix A). The **command messages** (RGB / screen /
-> clock opcodes, payloads, checksum) are still a best-effort model pending a
-> traffic capture. This document is the single source of truth the code is built
+> **Status: PARTIALLY CONFIRMED.** The USB identity, the HID transport and the
+> **screen** and **RGB** protocols are confirmed on a real device (sections 1,
+> 2, 4, 5, 6). The clock message is accepted and echoed by the keyboard; its
+> exact byte layout is not yet verified on screen. This document is the single source of truth the code is built
 > against — when you confirm a field, update both this file and the matching
 > constant in `src/vibe99/config.py` / `src/vibe99/protocol/`.
 
@@ -69,39 +68,72 @@ one function.
 | SCREEN_MODE | `0x13` | mode / animation header |
 | CLOCK_SYNC | `0x20` | date/time |
 
-## 4. RGB lighting (🟡 structure, ❓ bytes)
+## 4. RGB lighting (✅ verified on hardware)
 
-Payload after the frame header:
+Same layout as the Ajazz AK820 Pro (same SONiX vendor driver family); verified
+by setting static green on a real Vibe99.
+
+| Step | Bytes | Readback |
+|---|---|---|
+| 1 | `04 18 00 …` | yes |
+| 2 | `04 13 00 00 00 00 00 00 01 …` (one lighting packet follows) | yes |
+| 3 | lighting packet (below) | **no** |
+| 4 | `04 02 00 …` | yes |
+| 5 | `04 F0 00 …` | **no** |
+
+Lighting packet (64 bytes, no Report ID):
 
 ```
-[ effect, brightness(0-100), speed(0-100), R, G, B, direction ]
+[0] effect   [1] R  [2] G  [3] B   [8] rainbow (1 = ignore RGB)
+[9] brightness 0-5   [10] speed 0-5   [11] direction 0/1   [14] AA  [15] 55
 ```
 
-Effects (placeholder values): static=1, breathing=2, wave=3, rainbow=4,
-ripple=5, reactive=6, off=0.
+Effects (official driver `1033.lan` 521-540): 0 LED Off, 1 Static, 2 SingleOn,
+3 SingleOff, 4 Glittering, 5 Falling, 6 Colourful, 7 Breath, 8 Spectrum,
+9 Outward, 10 Scrolling, 11 Rolling, 12 Rotating, 13 Explode, 14 Launch,
+15 Ripples, 16 Flowing, 17 Pulsating, 18 Tilt, 19 Shuttle. Factory default:
+`<light default_mode="11" default_brightness="5" default_speed="3"/>`.
 
-## 5. Screen (✅ transport, 🟡 structure, ❓ bytes)
+## 5. Screen (✅ verified on hardware)
 
-- Panel: 1.06" TFT ✅. Resolution **240×240 RGB565 little-endian** 🟡/❓.
-- Frame size at 240×240 RGB565 = `240*240*2` = **115 200 bytes**.
-- Transport ✅: the screen interface (`0xFF68`) takes a **4096-byte output
-  report**, so a frame is ~29 reports (not ~2000). No Report ID.
-- Upload = `BEGIN` → many `DATA` chunks → `END`.
+- Panel: 1.06" TFT, **96×160 portrait**, **RGB565 little-endian**, row-major,
+  top-left first ✅ (official driver: `<screen width="96" height="160"/>`;
+  confirmed with a test pattern on a real keyboard).
+- One frame = `96*160*2` = **30 720 bytes**.
 
-`BEGIN` payload (`<HHIB`): `width, height, total_bytes, frame_index`.
-`DATA` payload: `<HH` (chunk_index, reserved) + pixel bytes.
-`END` payload: `[frame_index]`.
+Upload sequence (control = `0xFF13` feature reports, screen = `0xFF68` output
+reports; no numbered Report ID, so hidapi buffers start with `0x00`):
 
-### Bandwidth reality ✅(class) / ❓(exact)
-USB Full-Speed HID ≈ 64 KB/s sustained → one 115 KB frame ≈ ~2 s; on-device
-animation is only a few fps. This is why `upload-video` downsamples hard.
+| Step | Interface | Bytes | Notes |
+|---|---|---|---|
+| 1 | control | `04 18 00 …` | start session; echoed back by GET_FEATURE |
+| 2 | control | `04 72 01 00 00 00 00 00 <n lo> <n hi> …` | byte 2 = `gif_count` (1), bytes 8-9 = number of 4096-byte chunks |
+| 3 | screen | n × 4096 bytes | after **each** chunk the keyboard sends a 64-byte input report `01 5a 02 00 …` once stored; wait for it (the official driver waits up to 300 ms) |
+| 4 | control | `04 02 00 …` | commit |
 
-## 6. Animation (🟡)
+Every control report is followed by a GET_FEATURE readback (the keyboard
+echoes the command), with ~35 ms between reports (`cmd_delaytime` in the
+driver's `rgb-keyboard.xml`).
 
-`SCREEN_MODE` payload `<BB`: `frame_count, fps`, followed by each frame as a full
-`BEGIN/DATA/END` group with incrementing `frame_index`. Whether the device
-stores the animation on-board (documented for GIFs ✅) or needs host-driven
-playback is ❓.
+The data stream is:
+
+```
+[256-byte header][frame 0][frame 1]...[0xFF padding to a multiple of 4096]
+header[0]     = frame count (1..255)
+header[1 + i] = delay of frame i, in 2 ms units (1..255); 0 for a static image
+header[rest]  = 0xFF
+```
+
+### Bandwidth ✅
+USB Full-Speed, 64-byte interrupt endpoints at 1 ms. Measured: **~0.147 s per
+4 KB chunk** including the flash write, i.e. ~1.1 s per frame (841 chunks /
+112 frames in 2 min 04 s).
+
+## 6. Animation ✅
+
+Animations are **stored on the keyboard** (header above, `gif_maxframes="255"`)
+and loop on-device at the stored per-frame delays; playback is smooth. A static
+image is a one-frame animation.
 
 ## 7. Clock sync (🟡 structure, ❓ bytes)
 

@@ -1,128 +1,160 @@
 """RGB lighting command encoders.
 
-These build the correct packet sequences for the Mechlands Vibe99.
+Verified on a real Vibe99 (static green came out green). Same SONiX vendor
+driver family as the Ajazz AK820 Pro, whose layout this matches:
+
+1. ``04 18`` (start), ``04 13 00 00 00 00 00 00 01`` (one lighting packet follows),
+2. the lighting packet, sent without readback::
+
+       [0] effect  [1..3] R G B  [8] rainbow  [9] brightness 0-5
+       [10] speed 0-5  [11] direction  [14..15] AA 55
+
+3. ``04 02`` (commit) and ``04 F0`` (apply, no readback).
+
+Effect ids and names are the official driver's list (``1033.lan`` 521-540);
+the factory default is 11 (Rolling), brightness 5, speed 3
+(``<light default_mode="11" default_brightness="5" default_speed="3"/>``).
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from enum import IntEnum
 
 from ..errors import ValidationError
 from ..util.colors import RGB
 from .packets import Packet
 
+BRIGHTNESS_MAX = 5
+SPEED_MAX = 5
+
 
 class RgbEffect(IntEnum):
-    """Lighting effects mapped to the hardware's 1-11 modes."""
+    """Built-in lighting effects, numbered as the keyboard firmware expects."""
 
-    STATIC = 0x01
-    BREATHING = 0x02
-    WAVE = 0x03
-    RAINBOW = 0x04
-    RIPPLE = 0x05
-    REACTIVE = 0x06
-    MODE_7 = 0x07
-    MODE_8 = 0x08
-    MODE_9 = 0x09
-    MODE_10 = 0x0A
-    MODE_11 = 0x0B
-    OFF = 0x00
+    OFF = 0
+    STATIC = 1
+    SINGLE_ON = 2
+    SINGLE_OFF = 3
+    GLITTERING = 4
+    FALLING = 5
+    COLOURFUL = 6
+    BREATH = 7
+    SPECTRUM = 8
+    OUTWARD = 9
+    SCROLLING = 10
+    ROLLING = 11
+    ROTATING = 12
+    EXPLODE = 13
+    LAUNCH = 14
+    RIPPLES = 15
+    FLOWING = 16
+    PULSATING = 17
+    TILT = 18
+    SHUTTLE = 19
 
 
-# Friendly names exposed in the CLI -> effect.
-PRESETS: dict[str, RgbEffect] = {
-    "static": RgbEffect.STATIC,
-    "breathing": RgbEffect.BREATHING,
-    "wave": RgbEffect.WAVE,
-    "rainbow": RgbEffect.RAINBOW,
-    "ripple": RgbEffect.RIPPLE,
-    "reactive": RgbEffect.REACTIVE,
-    "mode7": RgbEffect.MODE_7,
-    "mode8": RgbEffect.MODE_8,
-    "mode9": RgbEffect.MODE_9,
-    "mode10": RgbEffect.MODE_10,
-    "mode11": RgbEffect.MODE_11,
-    "off": RgbEffect.OFF,
+@dataclass(frozen=True)
+class EffectInfo:
+    """Which controls an effect uses (from the vendor's default effect table)."""
+
+    name: str
+    speed: bool = True
+    direction: bool = False
+    color: bool = True  # accepts a fixed color (otherwise always multicolor)
+
+
+EFFECTS: dict[RgbEffect, EffectInfo] = {
+    RgbEffect.OFF: EffectInfo("LED Off", speed=False, color=False),
+    RgbEffect.STATIC: EffectInfo("Static", speed=False),
+    RgbEffect.SINGLE_ON: EffectInfo("SingleOn"),
+    RgbEffect.SINGLE_OFF: EffectInfo("SingleOff"),
+    RgbEffect.GLITTERING: EffectInfo("Glittering"),
+    RgbEffect.FALLING: EffectInfo("Falling"),
+    RgbEffect.COLOURFUL: EffectInfo("Colourful", color=False),
+    RgbEffect.BREATH: EffectInfo("Breath"),
+    RgbEffect.SPECTRUM: EffectInfo("Spectrum", color=False),
+    RgbEffect.OUTWARD: EffectInfo("Outward"),
+    RgbEffect.SCROLLING: EffectInfo("Scrolling", direction=True),
+    RgbEffect.ROLLING: EffectInfo("Rolling", direction=True),
+    RgbEffect.ROTATING: EffectInfo("Rotating", direction=True),
+    RgbEffect.EXPLODE: EffectInfo("Explode"),
+    RgbEffect.LAUNCH: EffectInfo("Launch"),
+    RgbEffect.RIPPLES: EffectInfo("Ripples"),
+    RgbEffect.FLOWING: EffectInfo("Flowing", direction=True),
+    RgbEffect.PULSATING: EffectInfo("Pulsating"),
+    RgbEffect.TILT: EffectInfo("Tilt", direction=True),
+    RgbEffect.SHUTTLE: EffectInfo("Shuttle"),
 }
 
+DEFAULT_EFFECT = RgbEffect.ROLLING
+DEFAULT_BRIGHTNESS = 5
+DEFAULT_SPEED = 3
 
-def _check_unit(name: str, value: int, lo: int = 0, hi: int = 100) -> int:
-    if not lo <= value <= hi:
-        raise ValidationError(f"{name} must be between {lo} and {hi}, got {value}.")
+# Friendly names exposed in the CLI -> effect (every effect by name, plus the
+# aliases earlier versions of this tool accepted).
+PRESETS: dict[str, RgbEffect] = {e.name.lower().replace("_", ""): e for e in RgbEffect}
+PRESETS.update(
+    {
+        "breathing": RgbEffect.BREATH,
+        "wave": RgbEffect.SCROLLING,
+        "rainbow": RgbEffect.ROLLING,
+        "ripple": RgbEffect.RIPPLES,
+        "reactive": RgbEffect.SINGLE_ON,
+    }
+)
+
+
+def _check(name: str, value: int, hi: int) -> int:
+    if not 0 <= value <= hi:
+        raise ValidationError(f"{name} must be between 0 and {hi}, got {value}.")
     return value
 
 
-def _make_rgb_packets(
-    effect: int,
-    brightness: int,
-    speed: int,
-    direction: int,
-    color: RGB | None = None,
-    colorful: bool = True,
-    profile: int = 1,
-) -> list[Packet]:
-    # Scale parameters
-    # brightness: 0..100 -> 0..5
-    scaled_brightness = int(round(brightness / 20.0))
-    # speed: 0..100 -> 1..5
-    scaled_speed = max(1, min(5, int(round(speed / 20.0))))
-    # direction: 0 or 1
-    scaled_direction = 1 if direction else 0
-    
-    # Setup color bytes
-    if color is not None:
-        r, g, b = color.r, color.g, color.b
-        is_colorful = 0
-        color_val = 0
-    else:
-        r, g, b = 0, 0, 0
-        is_colorful = 1 if colorful else 0
-        color_val = 255
-        
-    # Start command
-    p1 = Packet(0, raw_body=b"\x04\x18", description="rgb start 1")
-    # Preamble profile type
-    p2 = Packet(0, raw_body=bytes([0x04, 0x13, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, profile & 0xFF]), description="rgb start 2")
-    
-    # Actual RGB payload:
-    # 00 [mode] [color_val] [r] [g] [b] 00 00 00 [is_colorful] [brightness] [speed] [direction] 00 00 aa 55
-    body = bytearray(64)
-    body[0] = effect & 0xFF
-    body[1] = color_val & 0xFF
-    body[2] = r & 0xFF
-    body[3] = g & 0xFF
-    body[4] = b & 0xFF
-    body[8] = is_colorful & 0xFF
-    body[9] = scaled_brightness & 0xFF
-    body[10] = scaled_speed & 0xFF
-    body[11] = scaled_direction & 0xFF
-    body[14] = 0xaa
-    body[15] = 0x55
-    
-    p3 = Packet(0, raw_body=bytes(body), description=f"rgb config (mode={effect})")
-    
-    # Commit/finish
-    p4 = Packet(0, raw_body=b"\x04\x02", description="rgb commit")
-    return [p1, p2, p3, p4]
+def _percent_to_level(value: int, name: str, hi: int) -> int:
+    """Map the CLI's 0-100 scale onto the keyboard's 0-``hi`` levels."""
+    _check(name, value, 100)
+    return round(value * hi / 100)
 
 
-def set_solid_color(
-    color: RGB,
+def lighting_packets(
+    effect: RgbEffect | int,
     *,
-    brightness: int = 100,
-    profile: int = 1,
+    color: RGB | None = None,
+    brightness: int = DEFAULT_BRIGHTNESS,
+    speed: int = DEFAULT_SPEED,
+    direction: int = 0,
 ) -> list[Packet]:
-    """Set the whole keyboard to a single static color."""
-    _check_unit("brightness", brightness)
-    return _make_rgb_packets(
-        effect=RgbEffect.STATIC,
-        brightness=brightness,
-        speed=1,
-        direction=0,
-        color=color,
-        colorful=False,
-        profile=profile,
-    )
+    """Low-level: set an effect with keyboard-native levels.
+
+    ``color=None`` means rainbow/multicolor. ``brightness`` and ``speed`` are
+    0-5; ``direction`` is 0 (left->right / down) or 1 (the reverse).
+    """
+    _check("brightness", brightness, BRIGHTNESS_MAX)
+    _check("speed", speed, SPEED_MAX)
+    body = bytearray(64)
+    body[0] = int(effect) & 0xFF
+    if effect != RgbEffect.OFF:
+        r, g, b = (color.r, color.g, color.b) if color is not None else (255, 0, 0)
+        body[1:4] = bytes([r, g, b])
+        body[8] = 1 if color is None else 0
+        body[9] = brightness
+        body[10] = speed
+        body[11] = 1 if direction else 0
+    body[14:16] = b"\xaa\x55"
+    return [
+        Packet(0, raw_body=b"\x04\x18", description="rgb start"),
+        Packet(0, raw_body=bytes([0x04, 0x13, 0, 0, 0, 0, 0, 0, 1]), description="rgb header"),
+        Packet(0, raw_body=bytes(body), description=f"rgb effect {int(effect)}", readback=False),
+        Packet(0, raw_body=b"\x04\x02", description="rgb commit"),
+        Packet(0, raw_body=b"\x04\xf0", description="rgb apply", readback=False),
+    ]
+
+
+def set_solid_color(color: RGB, *, brightness: int = 100) -> list[Packet]:
+    """Set the whole keyboard to a single static color (brightness 0-100)."""
+    level = _percent_to_level(brightness, "brightness", BRIGHTNESS_MAX)
+    return lighting_packets(RgbEffect.STATIC, color=color, brightness=level)
 
 
 def set_effect(
@@ -130,38 +162,25 @@ def set_effect(
     *,
     color: RGB | None = None,
     brightness: int = 100,
-    speed: int = 50,
+    speed: int = 60,
     direction: int = 0,
-    profile: int = 1,
 ) -> list[Packet]:
-    """Set an animated lighting effect."""
-    _check_unit("brightness", brightness)
-    _check_unit("speed", speed)
-    return _make_rgb_packets(
-        effect=effect,
-        brightness=brightness,
-        speed=speed,
-        direction=direction,
+    """Set a lighting effect (brightness and speed 0-100; no color = rainbow)."""
+    return lighting_packets(
+        effect,
         color=color,
-        colorful=(color is None),
-        profile=profile,
+        brightness=_percent_to_level(brightness, "brightness", BRIGHTNESS_MAX),
+        speed=_percent_to_level(speed, "speed", SPEED_MAX),
+        direction=direction,
     )
 
 
-def set_brightness(brightness: int, profile: int = 1) -> list[Packet]:
-    """Change only the global brightness (0-100)."""
-    _check_unit("brightness", brightness)
-    # Default to active Mode 11 (the device default out-of-the-box)
-    return _make_rgb_packets(
-        effect=RgbEffect.MODE_11,
-        brightness=brightness,
-        speed=50,
-        direction=0,
-        colorful=True,
-        profile=profile,
-    )
+def set_brightness(brightness: int) -> list[Packet]:
+    """Factory effect (rainbow Rolling) at the given brightness (0-100)."""
+    level = _percent_to_level(brightness, "brightness", BRIGHTNESS_MAX)
+    return lighting_packets(DEFAULT_EFFECT, brightness=level)
 
 
-def turn_off(profile: int = 1) -> list[Packet]:
+def turn_off() -> list[Packet]:
     """Turn the lighting off."""
-    return set_effect(RgbEffect.OFF, brightness=0, profile=profile)
+    return lighting_packets(RgbEffect.OFF)

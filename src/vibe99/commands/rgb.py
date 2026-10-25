@@ -60,9 +60,12 @@ def preset(
     name: Annotated[str, typer.Argument(help="Effect name.")],
     color: Annotated[str, typer.Option("--color", "-c", help="Base color (optional).")] = "",
     brightness: Annotated[int, typer.Option("--brightness", "-b", min=0, max=100)] = 100,
-    speed: Annotated[int, typer.Option("--speed", "-s", min=0, max=100)] = 50,
+    speed: Annotated[int, typer.Option("--speed", "-s", min=0, max=100)] = 60,
+    reverse: Annotated[
+        bool, typer.Option("--reverse", "-r", help="Reverse the direction (moving effects).")
+    ] = False,
 ) -> None:
-    """Apply a lighting effect/preset (static, breathing, wave, rainbow, ...)."""
+    """Apply a lighting effect (rolling, breath, ripples, ... see `vibe99 rgb presets`)."""
     key = name.lower()
     if key not in rgb_proto.PRESETS:
         raise fail(f"Unknown preset {name!r}. Available: {', '.join(rgb_proto.PRESETS)}")
@@ -75,7 +78,9 @@ def preset(
             raise fail(str(exc)) from exc
     _run(
         ctx,
-        rgb_proto.set_effect(effect, color=rgb, brightness=brightness, speed=speed),
+        rgb_proto.set_effect(
+            effect, color=rgb, brightness=brightness, speed=speed, direction=int(reverse)
+        ),
         what=f"rgb preset {key}",
     )
 

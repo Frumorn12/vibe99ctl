@@ -44,15 +44,14 @@ VENDOR_USAGE_PAGE = CONTROL_USAGE_PAGE
 class ScreenSpec:
     """Geometry and pixel format of the integrated TFT screen.
 
-    The Vibe99 has a 1.06" panel (confirmed from marketing material). The exact
-    pixel resolution is *not* published; 240x240 RGB565 is the most common panel
-    in this device class and is used as the default until measured.
+    The Vibe99 has a 1.06" panel, 96x160 portrait per the official driver's
+    ``<screen width="96" height="160"/>``, fed row-major RGB565 little-endian
+    (verified on hardware with a test pattern: colors and orientation correct).
     """
 
     width: int = 96  # ✅
     height: int = 160  # ✅
-    # "rgb565-le" is by far the most common on SPI TFTs driven over HID.
-    pixel_format: str = "rgb565-le"  # TO-VERIFY (probable)
+    pixel_format: str = "rgb565-le"  # ✅
 
     @property
     def pixel_count(self) -> int:
@@ -73,10 +72,28 @@ DEFAULT_SCREEN = ScreenSpec()
 # --------------------------------------------------------------------------- #
 # Animation / media limits
 # --------------------------------------------------------------------------- #
-# USB Full-Speed HID sustains roughly 64 KB/s, so on-device animation is only a
-# handful of fps. We cap conversion defaults to keep uploads sane.
-DEFAULT_ANIMATION_FPS = 5  # TO-VERIFY (probable ceiling ~5-10 fps)
-MAX_ANIMATION_FRAMES = 120  # safety cap to avoid multi-MB uploads
+# From the official driver's rgb-keyboard.xml:
+#   <screen gif_headlength="256" gif_maxframes="255" gif_count="1" .../>  ✅
+# The animation is stored on the keyboard: a 256-byte header (frame count, then
+# one delay byte per frame in 2 ms units) followed by the raw frames.
+GIF_HEADER_BYTES = 256  # ✅
+GIF_MAX_FRAMES = 255  # ✅ hardware limit (frame count is one byte)
+GIF_COUNT = 1  # ✅ byte 2 of the 04 72 upload command (number of animation slots)
+GIF_DELAY_UNIT_MS = 2  # ✅ one delay unit = 2 ms, so 1..255 units = 2..510 ms
+
+# The bus is USB Full-Speed (64-byte interrupt endpoint at 1 ms) and the
+# keyboard writes each chunk to flash before ACKing it: measured ~0.15 s per
+# 4 KB chunk, i.e. ~1.1 s of upload per 96x160 frame (112 frames = 2 min).
+# Defaults stay well below the 255-frame maximum; playback itself is smooth.
+DEFAULT_ANIMATION_FPS = 15
+MAX_ANIMATION_FRAMES = 100  # default cap (~6.5 s at 15 fps, ~2 min upload)
+UPLOAD_SECONDS_PER_CHUNK = 0.147  # measured: 841 chunks in 2:04
+
+# --------------------------------------------------------------------------- #
+# USB identity (the Vibe99 reuses Apple's VID:PID, see device/descriptors.py)
+# --------------------------------------------------------------------------- #
+VIBE99_VID = 0x05AC  # ✅
+VIBE99_PID = 0x024F  # ✅
 
 # --------------------------------------------------------------------------- #
 # Timing
@@ -85,3 +102,7 @@ MAX_ANIMATION_FRAMES = 120  # safety cap to avoid multi-MB uploads
 # overrunning the device's receive buffer during a large screen upload.
 INTER_CHUNK_DELAY_S = 0.035  # Match official driver cmd_delaytime value=35
 READ_TIMEOUT_MS = 1000
+# After every 4096-byte screen chunk the keyboard answers on the screen
+# interface with ``01 5a 02 ...`` (seen on hardware) once it has stored it; the
+# official driver waits up to 300 ms for it before the next chunk, so do we.  ✅
+SCREEN_ACK_TIMEOUT_MS = 300

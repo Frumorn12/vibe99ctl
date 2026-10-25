@@ -49,6 +49,20 @@ app.command("dump-descriptor")(diagnostics.dump_descriptor)
 app.command("doctor")(diagnostics.doctor)
 
 
+@app.command("gui")
+def gui() -> None:
+    """Open the gallery: browse GIFs/videos (library + online store) and upload them."""
+    try:
+        from .gui.app import main as gui_main
+    except ImportError as exc:
+        err.print(
+            f"[bold red]error:[/] the gallery needs PyQt6 ({exc}). Install it with "
+            "`pip install 'vibe99ctl[gui]'` or your distro package (Arch: python-pyqt6)."
+        )
+        raise typer.Exit(1) from exc
+    raise typer.Exit(gui_main())
+
+
 def _version_callback(value: bool) -> None:
     if value:
         typer.echo(f"vibe99ctl {__version__}")

@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Vibe99
+GenericName=Schermo tastiera
+Comment=GIF e video sullo schermo della Mechlands Vibe99
+Exec=vibe99-gui
+Icon=vibe99
+Terminal=false
+Categories=Utility;
+Keywords=keyboard;tastiera;gif;screen;mechlands;vibe99;
+StartupWMClass=vibe99

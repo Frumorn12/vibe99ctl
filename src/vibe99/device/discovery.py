@@ -14,10 +14,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..config import CONTROL_USAGE_PAGE, SCREEN_USAGE_PAGE
-from ..errors import DeviceNotFoundError
+from ..errors import DeviceNotFoundError, DeviceOpenError
 from ..logging_utils import get_logger
 from .descriptors import DeviceId, lookup
-from .transport import HidTransport, Transport
+from .transport import HidTransport, Transport, _import_hid
 
 log = get_logger("discovery")
 
@@ -57,8 +57,8 @@ class DiscoveredDevice:
 def _enumerate_raw() -> list[dict]:
     """Wrapper around ``hid.enumerate`` that is easy to monkeypatch in tests."""
     try:
-        import hid  # type: ignore
-    except ImportError:  # pragma: no cover - environment dependent
+        hid = _import_hid()
+    except DeviceOpenError:  # pragma: no cover - environment dependent
         log.warning("hidapi not available; cannot enumerate HID devices.")
         return []
     return list(hid.enumerate())

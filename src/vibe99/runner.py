@@ -9,10 +9,10 @@ inspect exactly what *would* have been sent.
 from __future__ import annotations
 
 import time
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 
-from .config import INTER_CHUNK_DELAY_S
+from .config import INTER_CHUNK_DELAY_S, SCREEN_ACK_TIMEOUT_MS
 from .device.transport import Transport
 from .logging_utils import get_logger
 from .protocol.packets import Packet
@@ -26,6 +26,7 @@ class SendResult:
     bytes_sent: int = 0
     hex_dump: list[str] = field(default_factory=list)
     dry_run: bool = False
+    missing_acks: int = 0
 
 
 def send_packets(
@@ -35,12 +36,16 @@ def send_packets(
     dry_run: bool = False,
     delay_s: float = INTER_CHUNK_DELAY_S,
     collect_hex: bool = False,
+    progress: Callable[[int, int], None] | None = None,
 ) -> SendResult:
     """Send a sequence of packets.
 
     :param dry_run: when True, never call ``transport.write`` — only record.
     :param collect_hex: when True (or in dry-run), keep a hex dump per packet.
+    :param progress: called as ``progress(sent, total)`` after every packet.
     """
+    packets = list(packets)
+    total = len(packets)
     result = SendResult(dry_run=dry_run)
     keep_hex = collect_hex or dry_run
 
@@ -54,20 +59,25 @@ def send_packets(
         else:
             if pkt.report_size == 64:
                 transport.send_feature_report(report)
-                try:
-                    transport.get_feature_report(0, 65)
-                except Exception as exc:
-                    log.warning("Feature report readback handshake failed: %s", exc)
+                if pkt.readback:
+                    try:
+                        transport.get_feature_report(0, 65)
+                    except Exception as exc:
+                        log.warning("Feature report readback handshake failed: %s", exc)
                 if "screen upload" in (pkt.description or ""):
                     time.sleep(0.2)  # Give the device time to process setup/init commands
                 elif delay_s:
                     time.sleep(delay_s)
             else:
+                # Screen chunk: the keyboard paces the transfer with an ACK.
                 transport.write(report)
-                if delay_s:
-                    time.sleep(delay_s)
+                if not transport.read_screen_ack(SCREEN_ACK_TIMEOUT_MS):
+                    result.missing_acks += 1
+                    log.warning("No ACK for %s.", pkt.description or "screen chunk")
         result.packets_sent += 1
         result.bytes_sent += len(report)
+        if progress is not None:
+            progress(result.packets_sent, total)
 
     log.info(
         "%s %d packet(s), %d bytes.",
